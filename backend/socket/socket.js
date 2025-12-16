@@ -1,50 +1,57 @@
 const Message = require("../models/message");
+
 module.exports = function (io) {
-    const onlineUser = new Map();
+  const onlineUsers = new Map(); // ✅ FIXED name
 
-    io.on("connection", (socket) => {
-        console.log("New socket connected:", socket.id);
-        
-        socket.on("addUser", (UserId) => {
-            onlineUsers.set(userId, socket.id);
-        
-            io.emit("onlineUsers", Array.from(onlineUser.keys()));
+  io.on("connection", (socket) => {
+    console.log("🔌 New socket connected:", socket.id);
+
+    // ✅ ADD USER
+    socket.on("addUser", (userId) => {
+      if (!userId) return;
+
+      onlineUsers.set(userId, socket.id);
+      io.emit("onlineUsers", Array.from(onlineUsers.keys()));
+    });
+
+    // ✅ SEND MESSAGE
+    socket.on("sendMessage", async (data) => {
+      const { senderId, receiverId, text } = data;
+
+      if (!senderId || !receiverId || !text) return;
+
+      try {
+        const newMessage = await Message.create({
+          sender: senderId,
+          receiver: receiverId,
+          text,
         });
 
-        socket.on("sendMessage", async (data) => {
-            const { senderId, reciverId, text } = data;
+        const receiverSocketId = onlineUsers.get(receiverId);
 
+        // Send to receiver if online
+        if (receiverSocketId) {
+          io.to(receiverSocketId).emit("chatMessage", newMessage);
+        }
 
-            try {
-                const newMessage = await Message.create({
-                    sender: senderId,
-                    reciver: reciverId,
-                    text: text,
-                });
-                const receiverSocketId = onlineUsers.get(receiverId);
+        // Send back to sender
+        socket.emit("chatMessage", newMessage);
+      } catch (error) {
+        console.error("❌ Message send error:", error);
+      }
+    });
 
-                // Send message in real-time if receiver is online
-                if (receiverSocketId) {
-                    io.to(receiverSocketId).emit("getMessage", message);
-                }
-            } catch (error) {
-                console.error(" Message send error:", error);
-            }
-        
-        });
-     socket.on("disconnect", () => {
+    // ✅ DISCONNECT
+    socket.on("disconnect", () => {
       console.log("❌ Socket disconnected:", socket.id);
 
-      // Remove disconnected user
       for (let [userId, socketId] of onlineUsers.entries()) {
         if (socketId === socket.id) {
           onlineUsers.delete(userId);
         }
       }
 
-      // Send updated online users list
       io.emit("onlineUsers", Array.from(onlineUsers.keys()));
     });
   });
 };
-
