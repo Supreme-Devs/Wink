@@ -1,56 +1,57 @@
+console.log("🔥 backend/socket/socket.js LOADED");
+
+
 const Message = require("../models/message");
+const User = require("../models/User");
 
 module.exports = function (io) {
-  const onlineUsers = new Map(); // ✅ FIXED name
+  const onlineUsers = new Map();
 
-  io.on("connection", (socket) => {
-    console.log("🔌 New socket connected:", socket.id);
+  io.on("connection", async (socket) => {
+    console.log("🔌 Socket connected:", socket.userId);
 
-    // ✅ ADD USER
-    socket.on("addUser", (userId) => {
-      if (!userId) return;
+    onlineUsers.set(socket.userId, socket.id);
 
-      onlineUsers.set(userId, socket.id);
-      io.emit("onlineUsers", Array.from(onlineUsers.keys()));
-    });
+ 
+    io.emit("onlineUsers", Array.from(onlineUsers.keys()));
+
+    const users = await User.find().select("_id username");
+    console.log("📤 Sending allUsers:", users.length);
+    socket.emit("allUsers", users);
+
+    const messages = await Message.find({
+      $or: [
+        { sender: socket.userId },
+        { receiver: socket.userId },
+      ],
+    }).sort({ createdAt: 1 });
+
+    socket.emit("chatHistory", messages);
 
     // ✅ SEND MESSAGE
-    socket.on("sendMessage", async (data) => {
-      const { senderId, receiverId, text } = data;
-
+    socket.on("sendMessage", async ({ senderId, receiverId, text }) => {
       if (!senderId || !receiverId || !text) return;
 
-      try {
-        const newMessage = await Message.create({
-          sender: senderId,
-          receiver: receiverId,
-          text,
-        });
+      const newMessage = await Message.create({
+        sender: senderId,
+        receiver: receiverId,
+        text,
+      });
 
-        const receiverSocketId = onlineUsers.get(receiverId);
+      // send to sender
+      socket.emit("chatMessage", newMessage);
 
-        // Send to receiver if online
-        if (receiverSocketId) {
-          io.to(receiverSocketId).emit("chatMessage", newMessage);
-        }
-
-        // Send back to sender
-        socket.emit("chatMessage", newMessage);
-      } catch (error) {
-        console.error("❌ Message send error:", error);
+      // send to receiver if online
+      const receiverSocket = onlineUsers.get(receiverId);
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("chatMessage", newMessage);
       }
     });
 
     // ✅ DISCONNECT
     socket.on("disconnect", () => {
-      console.log("❌ Socket disconnected:", socket.id);
-
-      for (let [userId, socketId] of onlineUsers.entries()) {
-        if (socketId === socket.id) {
-          onlineUsers.delete(userId);
-        }
-      }
-
+      console.log("❌ Socket disconnected:", socket.userId);
+      onlineUsers.delete(socket.userId);
       io.emit("onlineUsers", Array.from(onlineUsers.keys()));
     });
   });

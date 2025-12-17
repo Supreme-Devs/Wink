@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Message = require("../models/message");
+const User = require("../models/User"); // ✅ Added to fetch usernames
 const mongoose = require("mongoose");
 const auth = require("../middleware/auth");
 
@@ -34,7 +35,18 @@ router.get("/inbox", auth, async (req, res) => {
       { $sort: { "message.createdAt": -1 } },
     ]);
 
-    res.json(inbox);
+    // ✅ Populate chatUser with username
+    const inboxWithNames = await Promise.all(
+      inbox.map(async (item) => {
+        const user = await User.findById(item.chatUser);
+        return {
+          ...item,
+          chatUserName: user ? user.username : "Unknown",
+        };
+      })
+    );
+
+    res.json(inboxWithNames);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -50,7 +62,20 @@ router.get("/chat/:userId", auth, async (req, res) => {
       ],
     }).sort({ createdAt: 1 });
 
-    res.json(messages);
+    // ✅ Add senderName and receiverName
+    const messagesWithNames = await Promise.all(
+      messages.map(async (msg) => {
+        const sender = await User.findById(msg.sender);
+        const receiver = await User.findById(msg.receiver);
+        return {
+          ...msg.toObject(),
+          senderName: sender ? sender.username : "Unknown",
+          receiverName: receiver ? receiver.username : "Unknown",
+        };
+      })
+    );
+
+    res.json(messagesWithNames);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -69,7 +94,15 @@ router.post("/", auth, async (req, res) => {
       text,
     });
 
-    res.status(201).json(message);
+    // ✅ Add senderName and receiverName in response
+    const sender = await User.findById(message.sender);
+    const receiver = await User.findById(message.receiver);
+
+    res.status(201).json({
+      ...message.toObject(),
+      senderName: sender ? sender.username : "Unknown",
+      receiverName: receiver ? receiver.username : "Unknown",
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
