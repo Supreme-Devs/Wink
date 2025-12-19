@@ -1,6 +1,5 @@
 console.log("🔥 backend/socket/socket.js LOADED");
 
-
 const Message = require("../models/message");
 const User = require("../models/User");
 
@@ -10,25 +9,14 @@ module.exports = function (io) {
   io.on("connection", async (socket) => {
     console.log("🔌 Socket connected:", socket.userId);
 
+    // store online user
     onlineUsers.set(socket.userId, socket.id);
 
- 
-    io.emit("onlineUsers", Array.from(onlineUsers.keys()));
-
+    // send all users
     const users = await User.find().select("_id username");
-    console.log("📤 Sending allUsers:", users.length);
     socket.emit("allUsers", users);
 
-    const messages = await Message.find({
-      $or: [
-        { sender: socket.userId },
-        { receiver: socket.userId },
-      ],
-    }).sort({ createdAt: 1 });
-
-    socket.emit("chatHistory", messages);
-
-    // ✅ SEND MESSAGE
+    // ================= CHAT =================
     socket.on("sendMessage", async ({ senderId, receiverId, text }) => {
       if (!senderId || !receiverId || !text) return;
 
@@ -38,21 +26,60 @@ module.exports = function (io) {
         text,
       });
 
-      // send to sender
       socket.emit("chatMessage", newMessage);
 
-      // send to receiver if online
       const receiverSocket = onlineUsers.get(receiverId);
       if (receiverSocket) {
         io.to(receiverSocket).emit("chatMessage", newMessage);
       }
     });
 
-    // ✅ DISCONNECT
+    // ================= 📹 VIDEO CALL =================
+
+    // CALL USER
+    socket.on("callUser", ({ to, offer }) => {
+      const receiverSocket = onlineUsers.get(to);
+
+      console.log("📞 callUser:", {
+        from: socket.userId,
+        to,
+        receiverSocket,
+      });
+
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("incomingCall", {
+          from: socket.userId,
+          offer,
+        });
+      }
+    });
+
+    // ANSWER CALL
+    socket.on("answerCall", ({ to, answer }) => {
+      const receiverSocket = onlineUsers.get(to);
+
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("callAccepted", {
+          answer,
+        });
+      }
+    });
+
+    // ICE CANDIDATE
+    socket.on("iceCandidate", ({ to, candidate }) => {
+      const receiverSocket = onlineUsers.get(to);
+
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("iceCandidate", {
+          candidate,
+        });
+      }
+    });
+
+    // ================= DISCONNECT =================
     socket.on("disconnect", () => {
       console.log("❌ Socket disconnected:", socket.userId);
       onlineUsers.delete(socket.userId);
-      io.emit("onlineUsers", Array.from(onlineUsers.keys()));
     });
   });
 };
